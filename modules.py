@@ -9,7 +9,7 @@ class EMA:
         super().__init__()
         self.beta = beta
         self.step = 0
-    
+
     def update_model_average(self, ma_model, current_model):
         for cur_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
             old_weight, up_weight = ma_params.data, cur_params.data
@@ -44,7 +44,7 @@ class SelfAttention(nn.Module):
             nn.GELU(),
             nn.Linear(channels, channels),
         )
-    
+
     def forward(self, x):
         x = x.view(-1, self.channels, self.size * self.size).swapaxes(1,2)
         x_ln = self.ln(x)
@@ -104,7 +104,7 @@ class Up(nn.Module):
             nn.SiLU(),
             nn.Linear(emb_dim, out_channels)
         )
-    
+
     def forward(self, x, skip_x, t):
         x = self.up(x)
         x = torch.cat([skip_x, x], dim = 1)
@@ -228,5 +228,3 @@ if __name__ == "__main__":
     t = x.new_tensor([500] * x.shape[0]).long()
     y = x.new_tensor([1] * x.shape[0]).long()
     print(net(x, t, y).shape)
-
-# Reference - https://github.com/dome272/Diffusion-Models-pytorch

@@ -1,23 +1,20 @@
 
-import os
 import copy
-import torch
 import wandb
-from torch import nn 
+from torch import nn
 from torch import optim
 from tqdm import tqdm
 from utils import *
-from modules import Unet, EMA, Unet_conditional
+from modules import EMA, Unet_conditional
 import logging
 import argparse
 import numpy as np
-#from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
 wandb.init(project = "diffusion-for-images")
-# wandb.config.update(args)
+wandb.config.update(args)
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO, datefmt="%I:%M:%S", filename = "ddpm_logs.log")
 
 class Diffusion:
@@ -73,7 +70,7 @@ def train_and_sample(args):
     device = args.device
     cifar10 =  datasets.CIFAR10(args.dataset_path, train=True, download=True, transform=transforms.ToTensor())
     cifar10_val = datasets.CIFAR10(args.dataset_path, train=False, download=True, transform=transforms.ToTensor())
-    dataloader = DataLoader(dataset = cifar10, batch_size=args.batch_size) # get_data(args)
+    dataloader = DataLoader(dataset = cifar10, batch_size=args.batch_size)
     model = Unet_conditional(num_classes= args.num_classes).to(device)
     optimizer = optim.AdamW(model.parameters(), lr = args.lr)
     loss_func = nn.MSELoss()
@@ -96,16 +93,16 @@ def train_and_sample(args):
                 labels = None
             predicted_noise = model(x_t, t, labels)
             loss = loss_func(predicted_noise, noise)
-            
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             ema.step_ema(ema_model, model)
 
-            pbar.set_postfix(MSE = loss.item()) 
+            pbar.set_postfix(MSE = loss.item())
             wandb.log({'step': epoch*l + i, 'loss' : loss.item()})
             logger.info(f"MSE: loss.item() = {loss.item()}, global_step = {epoch*l + i}")
-        
+
         if epoch % 1 == 0:
             labels = torch.arange(10).long().to(device)
             sampled_images = diffusion.sample(model, n=len(labels), labels=labels)
