@@ -11,7 +11,7 @@ To train the model run command
 python3 ddpm.py
 ```
 
-To generate the samples from the code, please uncomment line 121 to 123 in ddpm.py file.
+To generate the samples from the code, please uncomment last 3 line in ```train_and_sample()``` method ddpm.py file.
 
 ## Presentation
 This repo also contains a presentation delivered during the Technology Upskilling Series hosted by The Department of Computer Science at University of Toronto with the Vector Institute for AI on 25th March 2023.

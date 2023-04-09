@@ -13,8 +13,8 @@ from torchvision import datasets
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-wandb.init(project = "diffusion-for-images")
-wandb.config.update(args)
+#wandb.init(project = "diffusion-for-images")
+#wandb.config.update(args)
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO, datefmt="%I:%M:%S", filename = "ddpm_logs.log")
 
 class Diffusion:
@@ -100,7 +100,7 @@ def train_and_sample(args):
             ema.step_ema(ema_model, model)
 
             pbar.set_postfix(MSE = loss.item())
-            wandb.log({'step': epoch*l + i, 'loss' : loss.item()})
+            #wandb.log({'step': epoch*l + i, 'loss' : loss.item()})
             logger.info(f"MSE: loss.item() = {loss.item()}, global_step = {epoch*l + i}")
 
         if epoch % 1 == 0:

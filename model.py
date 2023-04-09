@@ -1,35 +1,13 @@
 
+import argparse
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import logging
+from torch import nn
+from torch import optim
+from tqdm import tqdm
+from torch.nn import functional as F
+from torch.cuda.amp import autocast, GradScaler
 
-class EMA:
-    def __init__(self, beta):
-        super().__init__()
-        self.beta = beta
-        self.step = 0
-
-    def update_model_average(self, ma_model, current_model):
-        for cur_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
-            old_weight, up_weight = ma_params.data, cur_params.data
-            ma_params.data = self.update_average(old_weight, up_weight)
-
-    def update_average(self, old, new):
-        if old is None:
-            return new
-        return old * self.beta + new * (1-self.beta)
-
-    def reset_parameter(self, ema_model, model):
-        ema_model.load_state_dict(model.state_dict())
-
-    def step_ema(self, ema_model, model, step_start_ema = 2000):
-        if self.step < step_start_ema:
-            self.reset_parameter(ema_model, model)
-            self.step += 1
-            return
-        self.update_model_average(ema_model, model)
-        self.step += 1
+from dataset import CifarDataset
 
 class SelfAttention(nn.Module):
     def __init__(self, channels, size):
@@ -147,7 +125,7 @@ class Unet(nn.Module):
         return pos_enc
 
     def forward(self, x, t):
-        t.unsqueeze_(-1).type(torch.float)
+        t = t.unsqueeze(-1).type(torch.float)
         t = self.pos_enc(t, self.time_dim)
 
         x1 = self.inc(x)
@@ -164,7 +142,7 @@ class Unet(nn.Module):
         return o
 
 class Unet_conditional(nn.Module):
-    def __init__(self, c_in = 3, c_out = 3, time_dim = 256, num_classes = None, device = torch.device("cpu")):
+    def __init__(self, c_in = 3, c_out = 3, time_dim = 256, num_classes = 10, device = torch.device("cpu")):
         super().__init__()
         self.device = device
         self.time_dim = time_dim
@@ -221,10 +199,96 @@ class Unet_conditional(nn.Module):
         o = self.outc(x7)
         return o
 
+class Diffusion(nn.Module):
+    def __init__(self, args):
+        super(Diffusion, self).__init__()
+        self.epochs = args.epochs
+        self.lr = args.lr
+        self.img_size = args.img_size
+        self.device = args.device
+        self.steps = 1000
+        self.beta_start = 1e-5
+        self.beta_end = 1e-2
+        self.beta = self.get_beta_schedule()
+        self.alpha = 1 - self.beta
+        self.alpha_bar = torch.cumprod(self.alpha, dim = -1)
+        self.model = Unet_conditional(device = self.device)
+        self.optimizer, self.lr_schedular, self.scaler = self.get_model_settings()
+
+    def get_beta_schedule(self):
+        return torch.linspace(self.beta_start, self.beta_end, self.steps).to(self.device)
+
+    def sample_timesteps(self, num_steps):
+        return torch.randint(1, self.steps, (num_steps,)).to(self.device)
+
+    def add_noise_to_images(self, batch_images, sample_timesteps):
+        sqrt_alpha_bar = torch.sqrt(self.alpha_bar[sample_timesteps])[:, None, None, None]
+        sqrt_on_minus_alpha_bar = torch.sqrt(1 - self.alpha_bar[sample_timesteps])[:, None, None, None]
+        noise = torch.rand_like(batch_images)
+        noised_images = sqrt_alpha_bar * batch_images + sqrt_on_minus_alpha_bar * noise
+        return noised_images, noise
+
+    def get_model_settings(self):
+        optimizer = optim.AdamW(self.model.parameters(), lr=self.lr)
+        lr_schedular = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode ='min', factor=0.1, patience=2)
+        scaler = GradScaler()
+        return optimizer, lr_schedular, scaler
+
+    def forward(self, batch_images, batch_labels):
+        sample_timesteps = self.sample_timesteps(batch_images.shape[0])
+        noised_images, actual_noise = self.add_noise_to_images(batch_images, sample_timesteps)
+        predicted_noise = self.model(noised_images, sample_timesteps, batch_labels)
+        return actual_noise, predicted_noise
+
+    def calculate_loss(self, actual_noise, predicted_noise):
+        mse = nn.MSELoss()
+        return mse(actual_noise, predicted_noise)
+
+    def fit(self, epoch, dataloader, type = "train"):
+        if type == "train":
+            self.train()
+        else:
+            self.eval()
+        losses = []
+        for idx, batch in enumerate(tqdm(dataloader)):
+            images, labels = batch
+            images.to(self.device)
+            labels.to(self.device)
+            with autocast():
+                actual_noise, predicted_noise = self.__call__(images, labels)
+                loss = self.calculate_loss(actual_noise, predicted_noise)
+                losses.append(loss)
+            if type == "train":
+                self.optimizer.zero_grad()
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+        if type == "train":
+            self.lr_schedular.step(loss)
+        return torch.tensor(losses).mean()
+
+    def evaluate(self, dataloader):
+        pass
+
+def get_args():
+    diffusion_parser = argparse.ArgumentParser()
+    diffusion_parser.add_argument("--name", type=str, default="nk_diffusion",
+                                  help="Give name to this run of Diffusion Model")
+    diffusion_parser.add_argument("--dataset_path", type=str, default='./data')
+    diffusion_parser.add_argument("--epochs", type=int, default=10)
+    diffusion_parser.add_argument("--batch_size", type=int, default=128)
+    diffusion_parser.add_argument("--img_size", type=int, default=32)
+    diffusion_parser.add_argument("--num_classes", type=int, default=10)
+    diffusion_parser.add_argument("--device",
+                                  default=torch.device(
+                                      "cuda" if torch.cuda.is_available() else "cpu"))
+    diffusion_parser.add_argument("--lr", type=float, default=1e-5)
+    args = diffusion_parser.parse_args()
+    return args
+
 if __name__ == "__main__":
-    net = Unet_conditional(num_classes = 10, device = torch.device("cpu"))
-    print(sum([p.numel() for p in net.parameters()]))
-    x = torch.randn(5, 3, 64, 64)
-    t = x.new_tensor([500] * x.shape[0]).long()
-    y = x.new_tensor([1] * x.shape[0]).long()
-    print(net(x, t, y).shape)
+    args = get_args()
+    val_dataset = CifarDataset(args.dataset_path, "valid")
+    val_dataloader = val_dataset.get_dataloader(args.batch_size)
+    diffusion_model = Diffusion(args)
+    loss = diffusion_model.fit(0, val_dataloader, "train")
