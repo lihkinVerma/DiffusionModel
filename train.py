@@ -1,4 +1,5 @@
 
+import os
 import torch
 from dataset import CifarDataset
 from model import Diffusion
@@ -17,5 +18,6 @@ def train_diffusion_model(args):
 
         if val_loss < best_loss:
             best_loss = val_loss
-            diffusion_model.evaluate()
+            torch.save(diffusion_model.state_dict(),
+                       os.path.join("models", args.name, "checkpoint.pt"))
     return True

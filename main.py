@@ -1,11 +1,11 @@
 
 import torch
 import argparse
-import train, evaluate
+import train, sample
 
 def main(args):
     train.train_diffusion_model(args)
-    evaluate.evaluate_diffusion_model(args)
+    sample.generate_new_samples(args)
     print("Called main")
 
 def get_args():
@@ -21,6 +21,7 @@ def get_args():
                                   default=torch.device(
                                       "cuda" if torch.cuda.is_available() else "cpu"))
     diffusion_parser.add_argument("--lr", type=float, default=1e-5)
+    diffusion_parser.add_argument("--guidance_scale", type=int, default=3)
     args = diffusion_parser.parse_args()
     return args
 

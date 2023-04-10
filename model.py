@@ -267,8 +267,28 @@ class Diffusion(nn.Module):
             self.lr_schedular.step(loss)
         return torch.tensor(losses).mean()
 
-    def evaluate(self, dataloader):
-        pass
+    def sample_new_images(self, num_images_to_generate, guiding_labels, guidance_scale = 3):
+        self.model.eval()
+        with torch.no_grad():
+            random_images = torch.randn((num_images_to_generate, 3, self.img_size, self.img_size)).to(self.device)
+            for i in tqdm(reversed(range(1, self.steps)), position=0):
+                t = (torch.ones(num_images_to_generate) * i).long().to(self.device)
+                predicted_noise = self.model(random_images, t, guiding_labels)
+                if guidance_scale > 0:
+                    unconditioned_predicted_noise = self.model(random_images, t, None)
+                    predicted_noise = torch.lerp(unconditioned_predicted_noise, predicted_noise, guidance_scale)
+                alpha = self.alpha[t][:, None, None, None]
+                alpha_hat = self.alpha_hat[t][:, None, None, None]
+                beta = self.beta[t][:, None, None, None]
+                if i > 1:
+                    noise = torch.rand_like(random_images)
+                else:
+                    noise = torch.zeros_like(random_images)
+                random_images = ( 1 / torch.sqrt(alpha) ) * (random_images - ((1 - alpha) / torch.sqrt(1 - alpha_hat)) * predicted_noise) + beta * noise
+        self.model.train()
+        clear_images = (random_images.clamp(-1, 1) + 1) / 2
+        clear_images = (clear_images * 255).type(torch.uint8)
+        return clear_images
 
 def get_args():
     diffusion_parser = argparse.ArgumentParser()
