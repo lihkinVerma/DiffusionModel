@@ -146,28 +146,28 @@ class Unet_conditional(nn.Module):
         super().__init__()
         self.device = device
         self.time_dim = time_dim
-        self.inc = DoubleConv(c_in, 64)
-        self.down1 = Down(64, 128)
-        self.sa1 = SelfAttention(128, 16)
-        self.down2 = Down(128, 256)
-        self.sa2 = SelfAttention(256, 8)
-        self.down3 = Down(256, 256)
-        self.sa3 = SelfAttention(256, 4)
+        self.inc = DoubleConv(c_in, 64).cuda()
+        self.down1 = Down(64, 128).cuda()
+        self.sa1 = SelfAttention(128, 16).cuda()
+        self.down2 = Down(128, 256).cuda()
+        self.sa2 = SelfAttention(256, 8).cuda()
+        self.down3 = Down(256, 256).cuda()
+        self.sa3 = SelfAttention(256, 4).cuda()
 
-        self.bot1 = DoubleConv(256, 512)
-        self.bot2 = DoubleConv(512, 512)
-        self.bot3 = DoubleConv(512, 256)
+        self.bot1 = DoubleConv(256, 512).cuda()
+        self.bot2 = DoubleConv(512, 512).cuda()
+        self.bot3 = DoubleConv(512, 256).cuda()
 
-        self.up1 = Up(512, 128)
-        self.sa4 = SelfAttention(128, 8)
-        self.up2 = Up(256, 64)
-        self.sa5 = SelfAttention(64, 16)
-        self.up3 = Up(128, 32)
-        self.sa6 = SelfAttention(32, 32)
-        self.outc = nn.Conv2d(32, c_out, kernel_size=1)
+        self.up1 = Up(512, 128).cuda()
+        self.sa4 = SelfAttention(128, 8).cuda()
+        self.up2 = Up(256, 64).cuda().cuda()
+        self.sa5 = SelfAttention(64, 16).cuda()
+        self.up3 = Up(128, 32).cuda()
+        self.sa6 = SelfAttention(32, 32).cuda()
+        self.outc = nn.Conv2d(32, c_out, kernel_size=1).cuda()
 
         if num_classes is not None:
-            self.label_emb = nn.Embedding(num_embeddings=num_classes, embedding_dim=time_dim)
+            self.label_emb = nn.Embedding(num_embeddings=num_classes, embedding_dim=time_dim, device = self.device)
 
     def pos_enc(self, t, channels):
         inv_freq = 1.0 / (
@@ -224,7 +224,7 @@ class Diffusion(nn.Module):
     def add_noise_to_images(self, batch_images, sample_timesteps):
         sqrt_alpha_bar = torch.sqrt(self.alpha_bar[sample_timesteps])[:, None, None, None]
         sqrt_on_minus_alpha_bar = torch.sqrt(1 - self.alpha_bar[sample_timesteps])[:, None, None, None]
-        noise = torch.rand_like(batch_images)
+        noise = torch.rand_like(batch_images).to(self.device)
         noised_images = sqrt_alpha_bar * batch_images + sqrt_on_minus_alpha_bar * noise
         return noised_images, noise
 
@@ -252,8 +252,8 @@ class Diffusion(nn.Module):
         losses = []
         for idx, batch in enumerate(tqdm(dataloader)):
             images, labels = batch
-            images.to(self.device)
-            labels.to(self.device)
+            images = images.to(self.device)
+            labels = labels.to(self.device)
             with autocast():
                 actual_noise, predicted_noise = self.__call__(images, labels)
                 loss = self.calculate_loss(actual_noise, predicted_noise)
@@ -273,18 +273,18 @@ class Diffusion(nn.Module):
             random_images = torch.randn((num_images_to_generate, 3, self.img_size, self.img_size)).to(self.device)
             for i in tqdm(reversed(range(1, self.steps)), position=0):
                 t = (torch.ones(num_images_to_generate) * i).long().to(self.device)
-                predicted_noise = self.model(random_images, t, guiding_labels)
+                predicted_noise = self.model(random_images, t.clone(), guiding_labels)
                 if guidance_scale > 0:
-                    unconditioned_predicted_noise = self.model(random_images, t, None)
+                    unconditioned_predicted_noise = self.model(random_images, t.clone(), None)
                     predicted_noise = torch.lerp(unconditioned_predicted_noise, predicted_noise, guidance_scale)
                 alpha = self.alpha[t][:, None, None, None]
-                alpha_hat = self.alpha_hat[t][:, None, None, None]
+                alpha_bar = self.alpha_bar[t][:, None, None, None]
                 beta = self.beta[t][:, None, None, None]
                 if i > 1:
                     noise = torch.rand_like(random_images)
                 else:
                     noise = torch.zeros_like(random_images)
-                random_images = ( 1 / torch.sqrt(alpha) ) * (random_images - ((1 - alpha) / torch.sqrt(1 - alpha_hat)) * predicted_noise) + beta * noise
+                random_images = ( 1 / torch.sqrt(alpha) ) * (random_images - ((1 - alpha) / torch.sqrt(1 - alpha_bar)) * predicted_noise) + beta * noise
         self.model.train()
         clear_images = (random_images.clamp(-1, 1) + 1) / 2
         clear_images = (clear_images * 255).type(torch.uint8)
